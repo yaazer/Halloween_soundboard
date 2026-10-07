@@ -2,7 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 // ---------- settings (remembered on this phone) ----------
 
-const DEFAULTS = { master: 0.85, drone: 0.6, scare: 1, duck: true, autoMin: 20, autoMax: 60 };
+const DEFAULTS = { master: 0.85, drone: 0.6, scare: 1, autoMin: 20, autoMax: 60 };
 let settings = { ...DEFAULTS };
 try {
   settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('spookboard') || '{}') };
@@ -45,13 +45,36 @@ const liveScares = new Set();
 const liveDrones = new Map(); // tile id -> { stop() }
 let customs = []; // { id, name, kind, blob, buffer }
 
+// Drones and scares each get their own volume and their own limiter, so a
+// loud scare can never turn the drones down.
 function makeBus(volume) {
-  // input -> volume -> duck -> master
   const vol = ac.createGain();
   vol.gain.value = volume;
-  const duck = ac.createGain();
-  vol.connect(duck).connect(master);
-  return { input: vol, vol, duck };
+  const limiter = ac.createDynamicsCompressor();
+  limiter.threshold.value = -6;
+  limiter.knee.value = 6;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.25;
+  vol.connect(limiter).connect(master);
+  return { input: vol, vol };
+}
+
+// Rounds off only the very top of the waveform when drones and scares add up
+// too loud. Unlike a limiter it never turns anything down over time.
+function softClipper() {
+  const shaper = ac.createWaveShaper();
+  const curve = new Float32Array(2049);
+  for (let i = 0; i < curve.length; i++) {
+    const x = ((i / (curve.length - 1)) * 2 - 1) * 2; // input range -2..2
+    const a = Math.abs(x);
+    curve[i] = a < 0.9 ? x : Math.sign(x) * (0.9 + 0.1 * Math.tanh((a - 0.9) / 0.1));
+  }
+  shaper.curve = curve;
+  const pre = ac.createGain();
+  pre.gain.value = 0.5; // map -2..2 onto the curve's -1..1 input
+  pre.connect(shaper);
+  return { input: pre, output: shaper };
 }
 
 function initAudio() {
@@ -63,17 +86,11 @@ function initAudio() {
   const Ctx = window.AudioContext || window.webkitAudioContext;
   ac = new Ctx({ latencyHint: 'interactive' });
 
-  // A limiter so stacking lots of sounds never distorts the speaker.
-  const limiter = ac.createDynamicsCompressor();
-  limiter.threshold.value = -6;
-  limiter.knee.value = 6;
-  limiter.ratio.value = 12;
-  limiter.attack.value = 0.003;
-  limiter.release.value = 0.25;
-  limiter.connect(ac.destination);
+  const clip = softClipper();
+  clip.output.connect(ac.destination);
   master = ac.createGain();
   master.gain.value = settings.master;
-  master.connect(limiter);
+  master.connect(clip.input);
 
   buses.drone = makeBus(settings.drone);
   buses.scare = makeBus(settings.scare);
@@ -96,21 +113,6 @@ function resumeAudio() {
   if (ac && ac.state !== 'running') ac.resume();
 }
 
-// ---------- ducking: drones dip while a scare plays ----------
-
-let duckUntil = 0;
-function duckDrones(seconds) {
-  if (!settings.duck || !ac) return;
-  const now = ac.currentTime;
-  const g = buses.drone.duck.gain;
-  duckUntil = Math.max(duckUntil, now + seconds);
-  g.cancelScheduledValues(now);
-  g.setValueAtTime(g.value, now);
-  g.linearRampToValueAtTime(0.35, now + 0.08);
-  g.setValueAtTime(0.35, duckUntil);
-  g.linearRampToValueAtTime(1, duckUntil + 1.2);
-}
-
 // ---------- playing things ----------
 
 function playScare(item, tile) {
@@ -130,7 +132,6 @@ function playScare(item, tile) {
     liveScares.delete(voice);
     voice.disconnect();
   }, (length + 1) * 1000);
-  duckDrones(length);
 
   if (tile) {
     tile.classList.add('firing');
@@ -407,12 +408,10 @@ function setup() {
 
   const dlg = $('settings');
   $('settingsBtn').addEventListener('click', () => {
-    $('duck').checked = settings.duck;
     $('autoMin').value = settings.autoMin;
     $('autoMax').value = settings.autoMax;
     dlg.showModal();
   });
-  $('duck').addEventListener('change', (ev) => { settings.duck = ev.target.checked; saveSettings(); });
   for (const k of ['autoMin', 'autoMax']) {
     $(k).addEventListener('change', (ev) => { settings[k] = Number(ev.target.value); saveSettings(); });
   }

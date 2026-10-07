@@ -8,7 +8,7 @@ scare buttons as trick-or-treaters walk up.
 - Add MP3/WAV/M4A files straight from your phone with the **＋ Add** tiles. They're saved on
   the phone and work offline.
 - **Auto-spook:** fires a random scare every 20–60 seconds (adjustable) while you hide
-- Drones **dip automatically** while a scare plays so the scare cuts through
+- Drones keep playing at full volume underneath your scares
 - **Works offline.** After the first visit, it runs entirely on the phone.
 - Keeps the screen awake, and has a big red **Stop all** button
 
