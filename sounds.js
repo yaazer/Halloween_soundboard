@@ -1,5 +1,6 @@
-// Every sound here is synthesized live with the Web Audio API, so the app
-// needs no audio files and works fully offline.
+// Every sound here is synthesized by code, so the app needs no audio files
+// and works fully offline. Voice-like scares are built sample-by-sample in
+// voices.js; the rest are wired up live from Web Audio API nodes.
 //
 // Each sound receives an "env" object:
 //   env.ac   - the AudioContext
@@ -8,6 +9,8 @@
 //   env.t    - start time (in ac.currentTime units)
 //
 // Scares return their length in seconds. Drones return { stop() }.
+
+import * as V from './voices.js';
 
 // ---------- small helpers ----------
 
@@ -75,10 +78,7 @@ function send(e, node, wetAmount) {
 // Vowel-like filter: a voice "buzz" through these sounds like a mouth.
 // Each entry is [frequency, level, sharpness].
 const VOWELS = {
-  ah: [[800, 1, 6], [1200, 0.6, 8], [2800, 0.25, 10]],
-  eh: [[530, 1, 6], [1850, 0.5, 9], [2500, 0.25, 10]],
   oo: [[320, 1, 5], [800, 0.35, 7], [2400, 0.1, 8]],
-  uh: [[450, 1, 5], [900, 0.6, 6], [2500, 0.2, 8]],
 };
 
 function formantBank(ac, vowel, out, makeup = 5) {
@@ -91,17 +91,45 @@ function formantBank(ac, vowel, out, makeup = 5) {
   return { input, filters };
 }
 
-// A smoothed random walk, handy for "wobbly" pitch curves.
-function wobbleCurve(points, lo, hi, smooth = 0.85) {
-  const c = new Float32Array(points);
-  let v = rand(lo, hi);
-  let target = v;
-  for (let i = 0; i < points; i++) {
-    if (Math.random() < 0.1) target = rand(lo, hi);
-    v = v * smooth + target * (1 - smooth);
-    c[i] = v;
+// Guitar-pedal style distortion, for grit.
+function distortion(ac, amount) {
+  const ws = ac.createWaveShaper();
+  const curve = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    const x = (i / 1023) * 2 - 1;
+    curve[i] = Math.tanh(x * amount) / Math.tanh(amount);
   }
-  return c;
+  ws.curve = curve;
+  ws.oversample = '2x';
+  return ws;
+}
+
+// Plays a scare that is pre-built sample-by-sample (see voices.js).
+// The next variation is prepared in the background right after each play,
+// so tapping is instant and repeats never sound identical.
+function prerendered(render, wetAmount) {
+  const ready = new WeakMap();
+  const make = (ac) => {
+    const [L, R] = render(ac.sampleRate);
+    const buf = ac.createBuffer(2, L.length, ac.sampleRate);
+    buf.getChannelData(0).set(L);
+    buf.getChannelData(1).set(R);
+    return buf;
+  };
+  const play = (e) => {
+    const buf = ready.get(e.ac) || make(e.ac);
+    ready.delete(e.ac);
+    const src = e.ac.createBufferSource();
+    src.buffer = buf;
+    send(e, src, wetAmount);
+    src.start(e.t);
+    setTimeout(() => play.warm(e.ac), 50);
+    return buf.duration;
+  };
+  play.warm = (ac) => {
+    if (!ready.has(ac)) ready.set(ac, make(ac));
+  };
+  return play;
 }
 
 // Shared reverb so everything sounds like it is in a crypt.
@@ -121,111 +149,6 @@ export function makeReverb(ac, seconds = 3.5) {
 
 // ---------- SCARES (one-shots) ----------
 
-function scream(e) {
-  const { ac, t } = e;
-  const d = rand(1.6, 2.2);
-  const base = rand(620, 820);
-  const out = gain(ac, 0);
-  out.gain.setValueAtTime(0, t);
-  out.gain.linearRampToValueAtTime(0.9, t + 0.08);
-  out.gain.setValueAtTime(0.9, t + d - 0.7);
-  out.gain.exponentialRampToValueAtTime(0.001, t + d);
-
-  const bank = formantBank(ac, 'ah', out, 4);
-  for (const detune of [-14, 11]) {
-    const o = osc(ac, 'sawtooth', base);
-    o.detune.value = detune;
-    o.frequency.setValueAtTime(base * 0.75, t);
-    o.frequency.linearRampToValueAtTime(base * 1.15, t + 0.25);
-    o.frequency.linearRampToValueAtTime(base, t + d * 0.7);
-    o.frequency.linearRampToValueAtTime(base * 0.65, t + d);
-    lfo(ac, rand(6, 8), base * 0.04, o.frequency, t, t + d);
-    o.connect(bank.input);
-    o.start(t);
-    o.stop(t + d);
-  }
-  const rasp = noise(ac);
-  rasp.connect(filt(ac, 'highpass', 2500)).connect(gain(ac, 0.12)).connect(out);
-  rasp.start(t);
-  rasp.stop(t + d);
-
-  send(e, out, 0.35);
-  return d;
-}
-
-function laugh(e, o) {
-  const { ac, t } = e;
-  const out = gain(ac, 1);
-  const bank = formantBank(ac, o.vowel, out, o.makeup);
-
-  const voice = gain(ac, 0);
-  voice.connect(bank.input);
-  const breath = gain(ac, 0);
-  breath.connect(bank.input);
-
-  const srcs = [osc(ac, 'sawtooth', o.f0)];
-  if (o.sub) srcs.push(osc(ac, 'sawtooth', o.f0 / 2));
-  const n = noise(ac);
-  n.connect(filt(ac, 'bandpass', 1500, 1)).connect(breath);
-
-  let st = t;
-  for (let i = 0; i < o.count; i++) {
-    const p = o.f0 * (1.15 - (i / o.count) * 0.35) * rand(0.95, 1.05);
-    srcs.forEach((s, k) => {
-      const f = k === 0 ? p : p / 2;
-      s.frequency.setValueAtTime(f * 1.12, st);
-      s.frequency.exponentialRampToValueAtTime(f * 0.88, st + o.syl);
-    });
-    breath.gain.setValueAtTime(0, st);
-    breath.gain.linearRampToValueAtTime(0.6, st + 0.015);
-    breath.gain.linearRampToValueAtTime(0, st + 0.05);
-    voice.gain.setValueAtTime(0, st + 0.02);
-    voice.gain.linearRampToValueAtTime(1, st + 0.045);
-    voice.gain.setValueAtTime(1, st + o.syl * 0.6);
-    voice.gain.linearRampToValueAtTime(0, st + o.syl);
-    st += o.syl + o.gap;
-  }
-  // The long final "haaaaa".
-  const fd = o.finalLen;
-  srcs.forEach((s, k) => {
-    const f = k === 0 ? o.f0 * o.finalFrom : (o.f0 * o.finalFrom) / 2;
-    s.frequency.setValueAtTime(f, st);
-    s.frequency.exponentialRampToValueAtTime(f * o.finalTo, st + fd);
-  });
-  breath.gain.setValueAtTime(0, st);
-  breath.gain.linearRampToValueAtTime(0.6, st + 0.02);
-  breath.gain.linearRampToValueAtTime(0, st + 0.08);
-  voice.gain.setValueAtTime(0, st + 0.03);
-  voice.gain.linearRampToValueAtTime(1, st + 0.07);
-  voice.gain.setValueAtTime(1, st + fd * 0.5);
-  voice.gain.linearRampToValueAtTime(0, st + fd);
-  const end = st + fd + 0.05;
-
-  srcs.forEach((s) => {
-    lfo(ac, 5.5, o.f0 * 0.03, s.frequency, t, end);
-    s.connect(voice);
-    s.start(t);
-    s.stop(end);
-  });
-  n.start(t);
-  n.stop(end);
-
-  send(e, out, o.wet);
-  return end - t;
-}
-
-const evilLaugh = (e) =>
-  laugh(e, {
-    f0: rand(100, 125), sub: true, syl: 0.17, gap: 0.08, count: 8,
-    vowel: 'ah', makeup: 4, finalLen: 1.1, finalFrom: 1.1, finalTo: 0.55, wet: 0.45,
-  });
-
-const witchCackle = (e) =>
-  laugh(e, {
-    f0: rand(380, 460), sub: false, syl: 0.085, gap: 0.035, count: 13,
-    vowel: 'eh', makeup: 4, finalLen: 0.8, finalFrom: 1.0, finalTo: 1.6, wet: 0.35,
-  });
-
 function thunder(e) {
   const { ac, t } = e;
   const d = 6;
@@ -239,6 +162,22 @@ function thunder(e) {
   send(e, cg, 0.5);
   crack.start(t);
   crack.stop(t + 0.6);
+
+  // Sizzling crackles as the bolt splits the air.
+  const crackle = noise(ac);
+  const kg = gain(ac, 0);
+  let ct = t;
+  for (let k = 0; k < 18; k++) {
+    ct += rand(0.01, 0.07) * (1 + k * 0.08);
+    const v = rand(0.3, 1) * (1 - k / 22);
+    kg.gain.setValueAtTime(v, ct);
+    kg.gain.exponentialRampToValueAtTime(0.01, ct + rand(0.01, 0.04));
+  }
+  kg.gain.setValueAtTime(0, ct + 0.05);
+  crackle.connect(filt(ac, 'bandpass', 2500, 0.8)).connect(distortion(ac, 3)).connect(kg);
+  send(e, kg, 0.6);
+  crackle.start(t);
+  crackle.stop(ct + 0.1);
 
   // The long rolling rumble.
   const rum = noise(ac);
@@ -273,128 +212,99 @@ function thunder(e) {
   return d;
 }
 
-function creakyDoor(e) {
-  const { ac, t } = e;
-  const d = rand(2, 2.8);
-  // A slow buzz = a series of "stick-slip" clicks, shaped by wood resonances.
-  const o = osc(ac, 'sawtooth', 40);
-  o.frequency.setValueCurveAtTime(wobbleCurve(64, 18, 90, 0.8), t, d);
-  const out = gain(ac, 0);
-  out.gain.setValueAtTime(0, t);
-  out.gain.linearRampToValueAtTime(1, t + 0.15);
-  out.gain.setValueCurveAtTime(wobbleCurve(32, 0.5, 1, 0.7), t + 0.2, d - 0.5);
-  out.gain.linearRampToValueAtTime(0, t + d);
-  for (const [f, q, g] of [[rand(450, 600), 18, 3], [rand(1000, 1300), 22, 2.5], [2300, 15, 1]]) {
-    o.connect(filt(ac, 'bandpass', f, q)).connect(gain(ac, g)).connect(out);
+// "Psycho"-style screeching violins: a cluster of high, harsh, wobbling notes.
+function screechStrings(ac, t, len, base, out) {
+  const bus = gain(ac, 0);
+  bus.gain.setValueAtTime(0, t);
+  bus.gain.linearRampToValueAtTime(1, t + 0.012);
+  bus.gain.setValueAtTime(1, t + len * 0.6);
+  bus.gain.exponentialRampToValueAtTime(0.001, t + len);
+  const tone = filt(ac, 'peaking', 3000, 1);
+  tone.gain.value = 8;
+  bus.connect(distortion(ac, 3)).connect(tone).connect(filt(ac, 'lowpass', 9000)).connect(out);
+  for (let i = 0; i < 9; i++) {
+    const f = base * Math.pow(2, rand(-3, 6) / 12);
+    const o = osc(ac, 'sawtooth', f);
+    o.detune.value = rand(-25, 25);
+    // Fast, uneven bow vibrato is what makes strings "scream".
+    lfo(ac, rand(6, 9), f * rand(0.015, 0.03), o.frequency, t, t + len);
+    lfo(ac, rand(1, 3), f * 0.01, o.frequency, t, t + len);
+    o.connect(gain(ac, 0.09)).connect(bus);
+    o.start(t);
+    o.stop(t + len);
   }
-  o.start(t);
-  o.stop(t + d);
-  send(e, out, 0.3);
-  return d;
+  // Rosin "scratch" of the bows.
+  const n = noise(ac);
+  n.connect(filt(ac, 'bandpass', base * 2, 2)).connect(gain(ac, 0.25)).connect(bus);
+  n.start(t);
+  n.stop(t + len);
 }
 
 function jumpScare(e) {
   const { ac, t } = e;
-  const d = 3.5;
-  // A clashing, dissonant "orchestra hit".
-  const notes = [65.4, 69.3, 92.5, 130.8, 138.6, 185, 277.2, 293.7, 415.3, 440];
-  const lp = filt(ac, 'lowpass', 7000, 1);
-  lp.frequency.setValueAtTime(7000, t);
-  lp.frequency.exponentialRampToValueAtTime(700, t + 2.5);
-  const out = gain(ac, 0);
-  out.gain.setValueAtTime(0, t);
-  out.gain.linearRampToValueAtTime(0.9, t + 0.01);
-  out.gain.exponentialRampToValueAtTime(0.25, t + 0.6);
-  out.gain.exponentialRampToValueAtTime(0.001, t + d);
-  lp.connect(out);
-  for (const f of notes) {
-    const o = osc(ac, 'sawtooth', f);
-    o.detune.value = rand(-10, 10);
-    o.connect(gain(ac, 0.13)).connect(lp);
-    o.start(t);
-    o.stop(t + d);
-  }
-  send(e, out, 0.5);
+  const d = 3.8;
+  const out = gain(ac, 1);
+  send(e, out, 0.45);
 
-  const boom = osc(ac, 'sine', 80);
-  boom.frequency.setValueAtTime(90, t);
-  boom.frequency.exponentialRampToValueAtTime(30, t + 0.8);
+  // Film-trailer "BRAAM": distorted low brass, with clashing notes.
+  const brass = gain(ac, 0);
+  brass.gain.setValueAtTime(0, t);
+  brass.gain.linearRampToValueAtTime(1, t + 0.02);
+  brass.gain.setTargetAtTime(0.5, t + 0.3, 0.4);
+  brass.gain.setTargetAtTime(0, t + 1.8, 0.5);
+  const bf = filt(ac, 'lowpass', 300, 2);
+  bf.frequency.setValueAtTime(300, t);
+  bf.frequency.exponentialRampToValueAtTime(3500, t + 0.06);
+  bf.frequency.exponentialRampToValueAtTime(600, t + 2);
+  brass.connect(bf).connect(distortion(ac, 4)).connect(gain(ac, 0.6)).connect(out);
+  for (const f of [55, 58.3, 82.4, 110, 116.5]) {
+    for (const det of [-9, 8]) {
+      const o = osc(ac, 'sawtooth', f);
+      o.detune.value = det + rand(-4, 4);
+      o.connect(gain(ac, 0.12)).connect(brass);
+      o.start(t);
+      o.stop(t + d);
+    }
+  }
+
+  screechStrings(ac, t, 2.2, rand(1500, 1900), out);
+
+  // Chest-thumping sub drop.
+  const boom = osc(ac, 'sine', 90);
+  boom.frequency.setValueAtTime(110, t);
+  boom.frequency.exponentialRampToValueAtTime(28, t + 1);
   const bg = gain(ac, 0);
   bg.gain.setValueAtTime(0, t);
-  bg.gain.linearRampToValueAtTime(1, t + 0.005);
-  bg.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
-  boom.connect(bg);
-  send(e, bg, 0.1);
+  bg.gain.linearRampToValueAtTime(1.2, t + 0.004);
+  bg.gain.exponentialRampToValueAtTime(0.001, t + 2);
+  boom.connect(distortion(ac, 1.5)).connect(bg).connect(out);
   boom.start(t);
-  boom.stop(t + 1.6);
+  boom.stop(t + 2);
 
+  // Crash and hiss.
   const crash = noise(ac);
   const ng = gain(ac, 0);
   ng.gain.setValueAtTime(0, t);
-  ng.gain.linearRampToValueAtTime(0.35, t + 0.005);
-  ng.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
-  crash.connect(filt(ac, 'highpass', 3000)).connect(ng);
-  send(e, ng, 0.6);
+  ng.gain.linearRampToValueAtTime(0.45, t + 0.003);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+  crash.connect(filt(ac, 'highpass', 2500)).connect(ng).connect(out);
   crash.start(t);
-  crash.stop(t + 1.5);
+  crash.stop(t + 1.7);
   return d;
 }
 
-function ghostWail(e) {
+// Repeated screeching stabs, like the shower scene in Psycho.
+function shriekStrings(e) {
   const { ac, t } = e;
-  const d = rand(3.2, 4);
-  const out = gain(ac, 0);
-  out.gain.setValueAtTime(0, t);
-  out.gain.linearRampToValueAtTime(0.7, t + 0.8);
-  out.gain.setValueAtTime(0.7, t + d - 1.2);
-  out.gain.linearRampToValueAtTime(0, t + d);
-  const bank = formantBank(ac, 'oo', out, 2.5);
-  const base = rand(260, 320);
-  // Two voices, slightly out of step, sound more unearthly than one.
-  [0, 0.15].forEach((delay, i) => {
-    const o = osc(ac, i ? 'sine' : 'triangle', base);
-    const s = t + delay;
-    o.detune.value = i ? 18 : 0;
-    o.frequency.setValueAtTime(base, s);
-    o.frequency.exponentialRampToValueAtTime(base * 1.8, s + 1.2);
-    o.frequency.exponentialRampToValueAtTime(base * 1.45, s + 2.2);
-    o.frequency.exponentialRampToValueAtTime(base * 0.8, t + d);
-    lfo(ac, 4.8, 10, o.frequency, t, t + d);
-    o.connect(bank.input);
-    o.connect(gain(ac, 0.25)).connect(out);
-    o.start(t);
-    o.stop(t + d);
-  });
-  send(e, out, 0.75);
-  return d;
-}
-
-function wolfHowl(e) {
-  const { ac, t } = e;
-  const d = rand(3.6, 4.4);
-  const b = rand(360, 420);
-  const out = gain(ac, 0);
-  out.gain.setValueAtTime(0, t);
-  out.gain.linearRampToValueAtTime(0.6, t + 0.35);
-  out.gain.setValueAtTime(0.6, t + d - 0.9);
-  out.gain.linearRampToValueAtTime(0, t + d);
-  const lp = filt(ac, 'lowpass', 2200);
-  lp.connect(out);
-  for (const [mult, type, lvl] of [[1, 'triangle', 1], [2, 'sine', 0.25]]) {
-    const o = osc(ac, type, b * mult);
-    const f = o.frequency;
-    f.setValueAtTime(b * mult, t);
-    f.exponentialRampToValueAtTime(b * 1.6 * mult, t + 0.6);
-    f.linearRampToValueAtTime(b * 1.7 * mult, t + d - 1.2);
-    f.exponentialRampToValueAtTime(b * 1.25 * mult, t + d - 0.3);
-    f.exponentialRampToValueAtTime(b * 0.9 * mult, t + d);
-    lfo(ac, 5, 6 * mult, f, t + 1, t + d);
-    o.connect(gain(ac, lvl)).connect(lp);
-    o.start(t);
-    o.stop(t + d);
+  const out = gain(ac, 1);
+  send(e, out, 0.5);
+  const base = rand(1700, 2100);
+  let at = t;
+  for (let i = 0; i < 6; i++) {
+    screechStrings(ac, at, 0.32, base * (i % 2 ? 0.944 : 1), out);
+    at += rand(0.2, 0.26);
   }
-  send(e, out, 0.65);
-  return d;
+  return at - t + 0.35;
 }
 
 function chains(e) {
@@ -461,102 +371,35 @@ function knock(e) {
   return 2.2;
 }
 
-function zombieGroan(e) {
-  const { ac, t } = e;
-  const d = rand(2.4, 3.2);
-  const out = gain(ac, 0);
-  out.gain.setValueAtTime(0, t);
-  out.gain.linearRampToValueAtTime(0.9, t + 0.4);
-  out.gain.setValueCurveAtTime(wobbleCurve(24, 0.6, 1, 0.7), t + 0.45, d - 1.1);
-  out.gain.linearRampToValueAtTime(0, t + d);
-  const bank = formantBank(ac, 'uh', out, 4);
-  // Growl: the voice is chopped rapidly on and off.
-  const growl = gain(ac, 0.6);
-  lfo(ac, rand(22, 32), 0.4, growl.gain, t, t + d);
-  growl.connect(bank.input);
-  for (const detune of [0, 25]) {
-    const o = osc(ac, 'sawtooth', 90);
-    o.detune.value = detune;
-    o.frequency.setValueCurveAtTime(wobbleCurve(48, 70, 115, 0.9), t, d);
-    o.connect(growl);
-    o.start(t);
-    o.stop(t + d);
-  }
-  send(e, out, 0.35);
-  return d;
-}
-
-function whisper(e) {
-  const { ac, t } = e;
-  const d = rand(2.6, 3.4);
-  const out = gain(ac, 0);
-  const pan = ac.createStereoPanner ? ac.createStereoPanner() : null;
-  const env = gain(ac, 0);
-  const bank = formantBank(ac, 'eh', env, 3);
-  const n = noise(ac);
-  n.connect(bank.input);
-  // Hiss for the "s" sounds.
-  const hiss = gain(ac, 0);
-  n.connect(filt(ac, 'highpass', 5000)).connect(hiss).connect(env);
-  // Random mouth shapes, one per syllable.
-  const shapes = Object.values(VOWELS);
-  let s = t;
-  while (s < t + d - 0.7) {
-    const len = rand(0.12, 0.26);
-    const shape = shapes[Math.floor(Math.random() * shapes.length)];
-    bank.filters.forEach((f, i) => f.frequency.setTargetAtTime(shape[i][0], s, 0.02));
-    env.gain.setTargetAtTime(rand(0.5, 1), s, 0.02);
-    env.gain.setTargetAtTime(0.05, s + len * 0.7, 0.03);
-    if (Math.random() < 0.3) {
-      hiss.gain.setTargetAtTime(0.5, s, 0.02);
-      hiss.gain.setTargetAtTime(0, s + len, 0.03);
-    }
-    s += len + rand(0.02, 0.1);
-  }
-  // A long trailing "sssss".
-  env.gain.setTargetAtTime(0.8, s, 0.05);
-  hiss.gain.setTargetAtTime(0.8, s, 0.05);
-  env.gain.setTargetAtTime(0, t + d - 0.25, 0.08);
-  out.gain.value = 1;
-  env.connect(out);
-  if (pan) {
-    // Sweeps from one side to the other.
-    pan.pan.setValueAtTime(-0.8, t);
-    pan.pan.linearRampToValueAtTime(0.8, t + d);
-    out.connect(pan);
-    send(e, pan, 0.5);
-  } else {
-    send(e, out, 0.5);
-  }
-  n.start(t);
-  n.stop(t + d);
-  return d;
-}
-
 // Balances loudness so every sound sits at a similar volume.
 function leveled(fn, level) {
-  return (e) => {
+  const play = (e) => {
     const dry = gain(e.ac, level);
     const wet = gain(e.ac, level);
     dry.connect(e.dry);
     wet.connect(e.wet);
     return fn({ ...e, dry, wet });
   };
+  play.warm = fn.warm;
+  return play;
 }
 
 export const SCARES = [
-  { id: 'scream', name: 'Scream', emoji: '😱', play: leveled(scream, 0.3) },
+  { id: 'scream', name: 'Scream', emoji: '😱', play: leveled(prerendered(V.scream, 0.35), 1) },
   { id: 'jump', name: 'Jump Scare', emoji: '💥', play: leveled(jumpScare, 0.8) },
-  { id: 'laugh', name: 'Evil Laugh', emoji: '😈', play: leveled(evilLaugh, 0.9) },
-  { id: 'cackle', name: 'Witch Cackle', emoji: '🧙', play: leveled(witchCackle, 0.6) },
+  { id: 'roar', name: 'Monster Roar', emoji: '👹', play: leveled(prerendered(V.monsterRoar, 0.3), 0.75) },
+  { id: 'strings', name: 'Shriek Strings', emoji: '🎻', play: leveled(shriekStrings, 0.8) },
+  { id: 'laugh', name: 'Evil Laugh', emoji: '😈', play: leveled(prerendered(V.evilLaugh, 0.45), 0.9) },
+  { id: 'cackle', name: 'Witch Cackle', emoji: '🧙', play: leveled(prerendered(V.witchCackle, 0.35), 0.8) },
+  { id: 'breath', name: 'Heavy Breathing', emoji: '😮‍💨', play: leveled(prerendered(V.heavyBreathing, 0.15), 1) },
+  { id: 'whisper', name: 'Whispers', emoji: '🤫', play: leveled(prerendered(V.whisper, 0.4), 1) },
+  { id: 'zombie', name: 'Zombie Groan', emoji: '🧟', play: leveled(prerendered(V.zombieGroan, 0.35), 0.85) },
+  { id: 'ghost', name: 'Ghost Wail', emoji: '👻', play: leveled(prerendered(V.ghostWail, 0.75), 0.8) },
+  { id: 'wolf', name: 'Wolf Howl', emoji: '🐺', play: leveled(prerendered(V.wolfHowl, 0.6), 0.7) },
   { id: 'thunder', name: 'Thunder', emoji: '⚡', play: leveled(thunder, 0.8) },
-  { id: 'door', name: 'Creaky Door', emoji: '🚪', play: leveled(creakyDoor, 2) },
-  { id: 'ghost', name: 'Ghost Wail', emoji: '👻', play: leveled(ghostWail, 0.5) },
-  { id: 'wolf', name: 'Wolf Howl', emoji: '🐺', play: leveled(wolfHowl, 0.7) },
-  { id: 'zombie', name: 'Zombie Groan', emoji: '🧟', play: leveled(zombieGroan, 1) },
+  { id: 'door', name: 'Creaky Door', emoji: '🚪', play: leveled(prerendered(V.creakyDoor, 0.3), 1) },
   { id: 'chains', name: 'Chains', emoji: '⛓️', play: leveled(chains, 3) },
   { id: 'knock', name: 'Knocking', emoji: '✊', play: leveled(knock, 1) },
-  { id: 'whisper', name: 'Whisper', emoji: '🤫', play: leveled(whisper, 2) },
 ];
 
 // ---------- DRONES (looping backgrounds) ----------

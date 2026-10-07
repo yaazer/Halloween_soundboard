@@ -96,6 +96,11 @@ function initAudio() {
   }, { capture: true });
 
   customs.forEach(decodeCustom);
+
+  // Pre-build the realistic voice scares in the background so taps are instant.
+  SCARES.forEach((s, i) => {
+    if (s.play.warm) setTimeout(() => s.play.warm(ac), 200 + i * 80);
+  });
 }
 
 function resumeAudio() {
