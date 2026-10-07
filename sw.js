@@ -1,6 +1,9 @@
 // Saves the app on the phone so it works with no internet connection.
-// Bump VERSION whenever any file changes so phones pick up the update.
-const VERSION = 'spookboard-v3';
+//
+// Online, it always fetches the latest version (so updates show up on their
+// own) and saves a copy. Offline, or on a very slow connection, it uses the
+// saved copy. Your own sounds are stored separately and are never touched.
+const VERSION = 'spookboard-v4';
 const FILES = [
   './',
   'index.html',
@@ -14,7 +17,12 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(VERSION)
+      // cache: 'reload' skips the browser's own cache, so we never save a stale file.
+      .then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -25,10 +33,23 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Offline first: answer from the saved copy, fall back to the network.
+// Network first, with a short timeout so a weak connection never stalls the app.
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET') return;
+  if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || fetch(e.request)),
+    (async () => {
+      const cache = await caches.open(VERSION);
+      try {
+        const fresh = await Promise.race([
+          fetch(e.request, { cache: 'no-cache' }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('slow')), 3000)),
+        ]);
+        if (fresh.ok) cache.put(e.request, fresh.clone());
+        return fresh;
+      } catch {
+        const saved = await cache.match(e.request, { ignoreSearch: true });
+        return saved || Response.error();
+      }
+    })(),
   );
 });

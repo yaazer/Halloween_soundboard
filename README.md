@@ -56,8 +56,8 @@ and works with no internet.
 
 ## Updating the app later
 
-If you change any file, also bump `VERSION` in `sw.js` (e.g. `spookboard-v2`). Otherwise
-phones keep serving the old saved copy. Fully closing and reopening the app picks up the update.
+The app always fetches the newest version when it has internet, so updates appear the next
+time you open it. (Phones that still have the very first version need to reopen it twice.)
 
 ## Files
 

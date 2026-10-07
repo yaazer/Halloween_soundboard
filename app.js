@@ -441,7 +441,13 @@ function setup() {
   $('editHint').addEventListener('click', () => setEditing(false));
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    // When an update arrives, reload once so it shows up straight away,
+    // unless sound is already playing (never interrupt a scare).
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadController && !ac) location.reload();
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   }
 }
 
