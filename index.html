@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0d0710">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Spookboard">
+  <title>Spookboard</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="start" class="start">
+    <button id="startBtn" class="start-btn">
+      <span class="start-emoji">🎃</span>
+      <span class="start-title">Spookboard</span>
+      <span class="start-sub">Tap to awaken the spirits</span>
+    </button>
+    <p class="start-tip">Connect your Bluetooth speaker first, then tap.</p>
+  </div>
+
+  <main>
+    <header>
+      <h1>🎃 Spookboard</h1>
+      <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙️</button>
+    </header>
+
+    <section class="mixer">
+      <label>Master <input id="volMaster" type="range" min="0" max="1" step="0.01"></label>
+      <label>Drones <input id="volDrone" type="range" min="0" max="1" step="0.01"></label>
+      <label>Scares <input id="volScare" type="range" min="0" max="1.5" step="0.01"></label>
+    </section>
+
+    <section>
+      <h2>Drones <small>tap to toggle · layer them</small></h2>
+      <div id="drones" class="grid drones"></div>
+    </section>
+
+    <section>
+      <h2>Scares <small>tap to fire</small></h2>
+      <div id="scares" class="grid scares"></div>
+    </section>
+
+    <p id="editHint" class="edit-hint" hidden>Edit mode: tap one of your ★ sounds to delete it. Tap here when done.</p>
+  </main>
+
+  <footer class="bar">
+    <button id="stopAll" class="bar-btn stop">⏹ Stop all</button>
+    <button id="random" class="bar-btn">🎲 Random</button>
+    <button id="auto" class="bar-btn" aria-pressed="false">
+      🤖 Auto <span id="autoStatus" class="auto-status">off</span>
+    </button>
+  </footer>
+
+  <dialog id="settings">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label class="row">
+        <input id="duck" type="checkbox">
+        Lower drones while a scare plays
+      </label>
+      <fieldset>
+        <legend>Auto-spook fires a random scare every…</legend>
+        <label>min <input id="autoMin" type="number" min="3" max="600"> s</label>
+        <label>max <input id="autoMax" type="number" min="3" max="600"> s</label>
+      </fieldset>
+      <fieldset>
+        <legend>Your own sounds</legend>
+        <p class="help">Add MP3/WAV/M4A files from your phone. They are saved on this device and work offline.</p>
+        <label class="file-btn">+ Add scare sound(s)
+          <input id="addScare" type="file" accept="audio/*" multiple hidden>
+        </label>
+        <label class="file-btn">+ Add drone loop(s)
+          <input id="addDrone" type="file" accept="audio/*" multiple hidden>
+        </label>
+        <button id="editMode" type="button" class="file-btn">✎ Delete my sounds…</button>
+      </fieldset>
+      <button class="close-btn" value="close">Done</button>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
