@@ -38,7 +38,7 @@ and works with no internet.
 1. Pair the Bluetooth speaker with your phone.
 2. Open **Spookboard** and tap the pumpkin.
 3. The first time, tap **＋ Add drones** and **＋ Add scares** to load your MP3s.
-   To delete one later: ⚙️ → **Delete my sounds…**, then tap the sound.
+   To remove one later: tap **✎ Edit** (top right), tap the sound, then **✓ Done**.
    Tap one or more **drones** to start the atmosphere (tap again to stop each one).
 4. Fire **scares** as kids walk up. Sounds start the instant your finger touches the tile.
 5. Or turn on **🤖 Auto** and let it scare people for you.

@@ -27,8 +27,13 @@
   <main>
     <header>
       <h1>🎃 Spookboard</h1>
-      <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙️</button>
+      <div class="header-actions">
+        <button id="editBtn" class="edit-btn" hidden>✎ Edit</button>
+        <button id="settingsBtn" class="icon-btn" aria-label="Settings">⚙️</button>
+      </div>
     </header>
+
+    <p id="editHint" class="edit-hint" hidden>Tap a sound to remove it. Tap <b>✓ Done</b> when finished.</p>
 
     <section class="mixer">
       <label>Master <input id="volMaster" type="range" min="0" max="1" step="0.01"></label>
@@ -46,7 +51,6 @@
       <div id="scares" class="grid scares"></div>
     </section>
 
-    <p id="editHint" class="edit-hint" hidden>Edit mode: tap a sound to delete it. Tap here when done.</p>
   </main>
 
   <footer class="bar">
@@ -74,7 +78,7 @@
         <p class="help">Add MP3/WAV/M4A files from your phone. They are saved on this device and work offline.</p>
         <label class="file-btn" for="addScare">+ Add scare sound(s)</label>
         <label class="file-btn" for="addDrone">+ Add drone loop(s)</label>
-        <button id="editMode" type="button" class="file-btn">✎ Delete my sounds…</button>
+        <button id="editMode" type="button" class="file-btn">✎ Remove sounds…</button>
       </fieldset>
       <button class="close-btn" value="close">Done</button>
     </form>

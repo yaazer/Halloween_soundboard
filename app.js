@@ -242,6 +242,9 @@ function render() {
       makeAddTile(kind),
     );
   }
+  // The Edit button only makes sense once there are sounds to remove.
+  $('editBtn').hidden = !customs.length;
+  if (!customs.length && editing) setEditing(false);
 }
 
 // ---------- custom sounds ----------
@@ -284,12 +287,13 @@ function setEditing(on) {
   editing = on;
   document.body.classList.toggle('editing', on);
   $('editHint').hidden = !on;
+  $('editBtn').textContent = on ? '✓ Done' : '✎ Edit';
 }
 
-// In edit mode, tapping one of your own sounds offers to delete it.
+// In edit mode, tapping a sound offers to remove it.
 function handleEdit(item) {
   if (!editing) return false;
-  if (confirm(`Delete "${item.name}"?`)) {
+  if (confirm(`Remove "${item.name}"?`)) {
     if (liveDrones.has(item.id)) {
       liveDrones.get(item.id).stop();
       liveDrones.delete(item.id);
@@ -297,6 +301,7 @@ function handleEdit(item) {
     customs = customs.filter((c) => c.id !== item.id);
     db.del(item.id).catch(() => {});
     render();
+    toast(`Removed "${item.name}"`);
   }
   return true;
 }
@@ -437,8 +442,7 @@ function setup() {
     })
     .catch(() => toast("This browser can't save sounds (private mode?)."));
 
-  // Leave edit mode with a tap on the hint.
-  $('editHint').addEventListener('click', () => setEditing(false));
+  $('editBtn').addEventListener('click', () => setEditing(!editing));
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // When an update arrives, reload once so it shows up straight away,

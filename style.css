@@ -37,6 +37,15 @@ h2 small { color: var(--muted); font-weight: normal; font-size: 0.8rem; margin-l
 button { font: inherit; color: inherit; cursor: pointer; }
 
 .icon-btn { background: none; border: 0; font-size: 1.6rem; padding: 6px; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.edit-btn {
+  background: var(--tile);
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-weight: 600;
+}
+body.editing .edit-btn { background: var(--green); color: #062010; }
 
 /* ---- mixer ---- */
 .mixer {
@@ -95,12 +104,30 @@ body.editing .tile:not(.add) { border-color: var(--red); border-style: dashed; }
 body.editing .tile:not(.add)::after {
   content: "✕";
   position: absolute;
-  top: 6px;
-  right: 8px;
-  color: var(--red);
+  top: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
 }
+body.editing .tile:not(.add):active { transform: scale(0.95); }
 body.editing .tile.add { visibility: hidden; }
-.edit-hint { color: var(--red); text-align: center; }
+.edit-hint {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 8px 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: #3a0f12;
+  color: #ffd6d6;
+  text-align: center;
+}
 
 /* ---- bottom bar ---- */
 .bar {
