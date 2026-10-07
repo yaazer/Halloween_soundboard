@@ -1,5 +1,3 @@
-import { SCARES, DRONES, makeReverb } from './sounds.js';
-
 const $ = (id) => document.getElementById(id);
 
 // ---------- settings (remembered on this phone) ----------
@@ -48,16 +46,12 @@ const liveDrones = new Map(); // tile id -> { stop() }
 let customs = []; // { id, name, kind, blob, buffer }
 
 function makeBus(volume) {
-  // dry + reverb -> volume -> duck -> master
+  // input -> volume -> duck -> master
   const vol = ac.createGain();
   vol.gain.value = volume;
   const duck = ac.createGain();
   vol.connect(duck).connect(master);
-  const dry = ac.createGain();
-  dry.connect(vol);
-  const wet = ac.createGain();
-  wet.connect(makeReverb(ac)).connect(vol);
-  return { dry, wet, vol, duck };
+  return { input: vol, vol, duck };
 }
 
 function initAudio() {
@@ -96,11 +90,6 @@ function initAudio() {
   }, { capture: true });
 
   customs.forEach(decodeCustom);
-
-  // Pre-build the realistic voice scares in the background so taps are instant.
-  SCARES.forEach((s, i) => {
-    if (s.play.warm) setTimeout(() => s.play.warm(ac), 200 + i * 80);
-  });
 }
 
 function resumeAudio() {
@@ -127,29 +116,20 @@ function duckDrones(seconds) {
 function playScare(item, tile) {
   initAudio();
   resumeAudio();
-  const bus = buses.scare;
-  // Each scare gets its own gains so "Stop all" can silence it instantly.
-  const voice = { dry: ac.createGain(), wet: ac.createGain() };
-  voice.dry.connect(bus.dry);
-  voice.wet.connect(bus.wet);
-  let length;
-  if (item.buffer) {
-    const src = ac.createBufferSource();
-    src.buffer = item.buffer;
-    src.connect(voice.dry);
-    src.start();
-    length = item.buffer.duration;
-  } else if (item.play) {
-    length = item.play({ ac, dry: voice.dry, wet: voice.wet, t: ac.currentTime + 0.01 });
-  } else {
-    return toast('That sound is still loading…');
-  }
+  if (!item.buffer) return toast('That sound is still loading…');
+  // Each scare gets its own volume control so "Stop all" can silence it instantly.
+  const voice = ac.createGain();
+  voice.connect(buses.scare.input);
+  const src = ac.createBufferSource();
+  src.buffer = item.buffer;
+  src.connect(voice);
+  src.start();
+  const length = item.buffer.duration;
   liveScares.add(voice);
   setTimeout(() => {
     liveScares.delete(voice);
-    voice.dry.disconnect();
-    voice.wet.disconnect();
-  }, (length + 4) * 1000); // +4s lets the echo finish
+    voice.disconnect();
+  }, (length + 1) * 1000);
   duckDrones(length);
 
   if (tile) {
@@ -162,17 +142,15 @@ function playScare(item, tile) {
 function startDrone(item) {
   initAudio();
   resumeAudio();
-  const e = { ac, dry: buses.drone.dry, wet: buses.drone.wet };
-  if (item.play) return item.play(e);
   if (!item.buffer) {
     toast('That sound is still loading…');
     return null;
   }
-  // A custom loop: fade in, loop forever, fade out on stop.
+  // Fade in, loop forever, fade out on stop.
   const g = ac.createGain();
   g.gain.setValueAtTime(0, ac.currentTime);
   g.gain.linearRampToValueAtTime(1, ac.currentTime + 2);
-  g.connect(e.dry);
+  g.connect(buses.drone.input);
   const src = ac.createBufferSource();
   src.buffer = item.buffer;
   src.loop = true;
@@ -208,12 +186,10 @@ function stopAll() {
   document.querySelectorAll('.tile.on').forEach((t) => t.classList.remove('on'));
   if (ac) {
     const now = ac.currentTime;
-    for (const v of liveScares) {
-      for (const g of [v.dry, v.wet]) {
-        g.gain.cancelScheduledValues(now);
-        g.gain.setValueAtTime(g.gain.value, now);
-        g.gain.linearRampToValueAtTime(0, now + 0.1);
-      }
+    for (const g of liveScares) {
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(g.gain.value, now);
+      g.gain.linearRampToValueAtTime(0, now + 0.1);
     }
     liveScares.clear();
   }
@@ -225,9 +201,9 @@ function stopAll() {
 
 function makeTile(item, kind) {
   const b = document.createElement('button');
-  b.className = 'tile' + (item.blob ? ' custom' : '') + (item.blob && !item.buffer ? ' missing' : '');
+  b.className = 'tile' + (item.buffer ? '' : ' missing');
   b.innerHTML = `<span class="emoji"></span><span class="name"></span>`;
-  b.querySelector('.emoji').textContent = item.emoji || (kind === 'scare' ? '🔊' : '🔁');
+  b.querySelector('.emoji').textContent = kind === 'scare' ? '🔊' : '🔁';
   b.querySelector('.name').textContent = item.name;
   if (liveDrones.has(item.id)) b.classList.add('on');
 
@@ -247,17 +223,25 @@ function makeTile(item, kind) {
   return b;
 }
 
+// The "+ Add" tile at the end of each section opens the phone's file picker.
+function makeAddTile(kind) {
+  const b = document.createElement('button');
+  b.className = 'tile add';
+  b.innerHTML = `<span class="emoji">＋</span><span class="name"></span>`;
+  b.querySelector('.name').textContent = kind === 'scare' ? 'Add scares' : 'Add drones';
+  b.addEventListener('click', () => {
+    if (!editing) $(kind === 'scare' ? 'addScare' : 'addDrone').click();
+  });
+  return b;
+}
+
 function render() {
-  const droneGrid = $('drones');
-  const scareGrid = $('scares');
-  droneGrid.replaceChildren(
-    ...DRONES.map((d) => makeTile(d, 'drone')),
-    ...customs.filter((c) => c.kind === 'drone').map((c) => makeTile(c, 'drone')),
-  );
-  scareGrid.replaceChildren(
-    ...SCARES.map((s) => makeTile(s, 'scare')),
-    ...customs.filter((c) => c.kind === 'scare').map((c) => makeTile(c, 'scare')),
-  );
+  for (const kind of ['drone', 'scare']) {
+    $(kind + 's').replaceChildren(
+      ...customs.filter((c) => c.kind === kind).map((c) => makeTile(c, kind)),
+      makeAddTile(kind),
+    );
+  }
 }
 
 // ---------- custom sounds ----------
@@ -292,7 +276,7 @@ async function addFiles(files, kind) {
     added++;
   }
   render();
-  if (added) toast(`Added ${added} sound${added > 1 ? 's' : ''} ★`);
+  if (added) toast(`Added ${added} sound${added > 1 ? 's' : ''}`);
 }
 
 let editing = false;
@@ -305,7 +289,6 @@ function setEditing(on) {
 // In edit mode, tapping one of your own sounds offers to delete it.
 function handleEdit(item) {
   if (!editing) return false;
-  if (!item.blob) return true;
   if (confirm(`Delete "${item.name}"?`)) {
     if (liveDrones.has(item.id)) {
       liveDrones.get(item.id).stop();
@@ -324,16 +307,12 @@ let autoTimer = null;
 let autoAt = 0;
 let autoTick = null;
 
-function allScares() {
-  return [...SCARES, ...customs.filter((c) => c.kind === 'scare' && c.buffer)];
-}
-
 function randomScare() {
-  const list = allScares();
-  const item = list[Math.floor(Math.random() * list.length)];
-  const idx = SCARES.indexOf(item);
-  const tile = $('scares').children[idx >= 0 ? idx : SCARES.length + customs.filter((c) => c.kind === 'scare').indexOf(item)];
-  playScare(item, tile);
+  const scares = customs.filter((c) => c.kind === 'scare');
+  const ready = scares.filter((c) => c.buffer);
+  if (!ready.length) return toast('Add some scare sounds first.');
+  const item = ready[Math.floor(Math.random() * ready.length)];
+  playScare(item, $('scares').children[scares.indexOf(item)]);
 }
 
 function scheduleAuto() {
@@ -354,6 +333,11 @@ function setAuto(on) {
   $('auto').setAttribute('aria-pressed', String(on));
   $('autoStatus').textContent = 'off';
   if (!on) return;
+  if (!customs.some((c) => c.kind === 'scare')) {
+    $('auto').setAttribute('aria-pressed', 'false');
+    toast('Add some scare sounds first.');
+    return;
+  }
   initAudio();
   scheduleAuto();
   const update = () => {
@@ -451,7 +435,7 @@ function setup() {
       customs.forEach(decodeCustom);
       render();
     })
-    .catch(() => { /* IndexedDB unavailable: built-in sounds still work */ });
+    .catch(() => toast("This browser can't save sounds (private mode?)."));
 
   // Leave edit mode with a tap on the hint.
   $('editHint').addEventListener('click', () => setEditing(false));

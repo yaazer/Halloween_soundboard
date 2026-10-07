@@ -72,14 +72,8 @@ input[type="range"] { width: 100%; accent-color: var(--orange); height: 28px; }
 .tile .emoji { font-size: 2rem; line-height: 1; }
 .tile .name { font-size: 0.85rem; text-align: center; overflow-wrap: anywhere; }
 .tile:active { transform: scale(0.95); }
-.tile.custom::after {
-  content: "★";
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  font-size: 0.7rem;
-  color: var(--orange);
-}
+.tile.add { background: transparent; border: 2px dashed #ffffff33; color: var(--muted); }
+.tile.add .emoji { font-size: 1.8rem; }
 
 .drones .tile.on {
   border-color: var(--green);
@@ -97,8 +91,15 @@ input[type="range"] { width: 100%; accent-color: var(--orange); height: 28px; }
 }
 
 .tile.missing { opacity: 0.4; }
-body.editing .tile.custom { border-color: var(--red); border-style: dashed; }
-body.editing .tile.custom::after { content: "✕"; color: var(--red); font-size: 1rem; }
+body.editing .tile:not(.add) { border-color: var(--red); border-style: dashed; }
+body.editing .tile:not(.add)::after {
+  content: "✕";
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  color: var(--red);
+}
+body.editing .tile.add { visibility: hidden; }
 .edit-hint { color: var(--red); text-align: center; }
 
 /* ---- bottom bar ---- */

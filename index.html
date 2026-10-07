@@ -37,7 +37,7 @@
     </section>
 
     <section>
-      <h2>Drones <small>tap to toggle · layer them</small></h2>
+      <h2>Drones <small>looping backgrounds · tap to toggle</small></h2>
       <div id="drones" class="grid drones"></div>
     </section>
 
@@ -46,7 +46,7 @@
       <div id="scares" class="grid scares"></div>
     </section>
 
-    <p id="editHint" class="edit-hint" hidden>Edit mode: tap one of your ★ sounds to delete it. Tap here when done.</p>
+    <p id="editHint" class="edit-hint" hidden>Edit mode: tap a sound to delete it. Tap here when done.</p>
   </main>
 
   <footer class="bar">
@@ -72,17 +72,16 @@
       <fieldset>
         <legend>Your own sounds</legend>
         <p class="help">Add MP3/WAV/M4A files from your phone. They are saved on this device and work offline.</p>
-        <label class="file-btn">+ Add scare sound(s)
-          <input id="addScare" type="file" accept="audio/*" multiple hidden>
-        </label>
-        <label class="file-btn">+ Add drone loop(s)
-          <input id="addDrone" type="file" accept="audio/*" multiple hidden>
-        </label>
+        <label class="file-btn" for="addScare">+ Add scare sound(s)</label>
+        <label class="file-btn" for="addDrone">+ Add drone loop(s)</label>
         <button id="editMode" type="button" class="file-btn">✎ Delete my sounds…</button>
       </fieldset>
       <button class="close-btn" value="close">Done</button>
     </form>
   </dialog>
+
+  <input id="addScare" type="file" accept="audio/*" multiple hidden>
+  <input id="addDrone" type="file" accept="audio/*" multiple hidden>
 
   <div id="toast" class="toast" hidden></div>
 

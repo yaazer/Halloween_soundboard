@@ -1,14 +1,11 @@
 // Saves the app on the phone so it works with no internet connection.
 // Bump VERSION whenever any file changes so phones pick up the update.
-const VERSION = 'spookboard-v2';
+const VERSION = 'spookboard-v3';
 const FILES = [
   './',
   'index.html',
   'style.css',
   'app.js',
-  'sounds.js',
-  'voices.js',
-  'dsp.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-180.png',
